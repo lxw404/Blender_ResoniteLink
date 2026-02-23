@@ -379,6 +379,47 @@ class SendSceneOperator(bpy.types.Operator):
                     if (len(mesh.vertex_colors) > 0):
                         vertex_colors = mesh.vertex_colors
 
+                # Detect if the mesh is skinned
+                is_skinned = False
+                armature_obj = None  # Armature object reference
+                bone_map = {}  # A map of bone names to other data
+                bones = []  # Flat list of Bone definitions
+                if ((len(obj.vertex_groups) > 0) and (len(obj.modifiers) > 0)):
+                    for m in obj.modifiers:
+                        if m.type == 'ARMATURE':
+                            armature_obj = m.object
+                            is_skinned = True
+                            break
+                    
+                    # If the object is skinned, map out the bones
+                    if is_skinned:
+                        # Extract vertex group names
+                        vgn = [v.name for v in obj.vertex_groups]
+                        
+                        # Extract bone names
+                        bone_data = armature_obj.data.bones
+                        bn = [b.name for b in bone_data]
+                        
+                        # Store bones
+                        for n in vgn:
+                            b = Bone(
+                                name = n,
+                                bind_pose = 
+                                    b2u_mat4(bone_data[bn.index(n)].matrix_local) if n in bn
+                                    else Float4x4(
+                                        1.0, 0.0, 0.0, 0.0,
+                                        0.0, 1.0, 0.0, 0.0,
+                                        0.0, 0.0, 1.0, 0.0,
+                                        0.0, 0.0, 0.0, 1.0
+                                    )  # Default bind pose
+                            )
+                            bones.append(b)
+                    
+                # Detect if the mesh has shapekeys
+                has_shapekeys = False
+                if (mesh.shape_keys is not None):
+                    has_shapekeys = True
+
                 # Save a dictionary of unique vertex hashes for fast indexing
                 v_map = {}  # TODO: Make hashing faster probably
                 idmax = 0   # Current maximum vertex ID
@@ -389,7 +430,9 @@ class SendSceneOperator(bpy.types.Operator):
                 normals = []  # Normals per vertex
                 tangents = []  # Tangents per vertex
                 uvs = [[] for _ in uv_layers]  # List of uv lists per uv set
-                submeshes = []  # List of lists of triangle indices, per material
+                submeshes = []  # List of triangle lists per material
+                bone_weights = []  # List of BoneWeightRawData corresponding to each vertex
+                blendshapes = []  # List of BlendshapeRawData for each blendshape
 
                 # Loop through all triangles and store their indices according
                 # to their material ID
@@ -455,6 +498,19 @@ class SendSceneOperator(bpy.types.Operator):
                             for uid, layer in enumerate(vuvs):
                                 uvs[uid].append(layer[1][0])
                                 uvs[uid].append(layer[1][1])
+                            if (is_skinned):
+                                # Loop through all bones and append weight contribution
+                                vbg = mesh.vertices[vidx].groups  # Vertex bone groups
+                                vbgi = [v.group for v in vbg]  # Vertex bone group indices
+                                for bi, vn in enumerate(obj.vertex_groups):
+                                    # Extract the bone weight
+                                    bone_weight = vbg[vbgi.index(bi)].weight if bi in vbgi else 0.0
+                                    
+                                    # Append the raw data to the list
+                                    bone_weights.append(BoneWeightRawData(
+                                        bone_index = bi,
+                                        weight = bone_weight
+                                    ))
                         else:
                             # Retrieve the old index
                             v_tid = v_map[vhash]
@@ -478,6 +534,9 @@ class SendSceneOperator(bpy.types.Operator):
                     normals=normals,
                     uv_channel_dimensions=[2 for _ in uvs],  # Hard coded to U, V (2D)
                     uvs=uvs,
+                    bones=bones if is_skinned else None,
+                    bone_weights=bone_weights if is_skinned else None,
+                    blendshapes=blendshapes if has_shapekeys else None
                     tangents=tangents
                 )
 
@@ -519,17 +578,31 @@ class SendSceneOperator(bpy.types.Operator):
 
                 # Create/update the material data
                 if meshSlotData.meshRenderer == None or not await componentExistsAsync(meshSlotData.meshRenderer):
-                    # Add the mesh component to the slot
-                    meshSlotData.meshRenderer = await meshSlotData.slot.add_component(
-                        "[FrooxEngine]FrooxEngine.MeshRenderer",
-                        Mesh=Reference(
-                            target_id=meshSlotData.meshComp.id,
-                            target_type="[FrooxEngine]FrooxEngine.IAssetProvider<[FrooxEngine]FrooxEngine.Mesh>"
-                        ),
-                        Materials=SyncList(
-                            *mat_reflist
+                    # Check for skinned/static
+                    if (is_skinned or has_shapekeys):
+                        # Skinned mesh
+                        meshSlotData.meshRenderer = await meshSlotData.slot.add_component(
+                            "[FrooxEngine]FrooxEngine.SkinnedMeshRenderer",
+                            Mesh=Reference(
+                                target_id=meshSlotData.meshComp.id,
+                                target_type="[FrooxEngine]FrooxEngine.IAssetProvider<[FrooxEngine]FrooxEngine.Mesh>"
+                            ),
+                            Materials=SyncList(
+                                *mat_reflist
+                            )
                         )
-                    )
+                    else:
+                        # Static mesh
+                        meshSlotData.meshRenderer = await meshSlotData.slot.add_component(
+                            "[FrooxEngine]FrooxEngine.MeshRenderer",
+                            Mesh=Reference(
+                                target_id=meshSlotData.meshComp.id,
+                                target_type="[FrooxEngine]FrooxEngine.IAssetProvider<[FrooxEngine]FrooxEngine.Mesh>"
+                            ),
+                            Materials=SyncList(
+                                *mat_reflist
+                            )
+                        )
                 elif newMesh or newMat or meshSlotData.hidden:
                     meshSlotData.hidden = False
                     await client.update_component(

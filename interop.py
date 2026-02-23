@@ -107,3 +107,27 @@ def b2u_euler2quaternion(e):
     """
     
     return Euler((e.x, -e.z, e.y), "XYZ").to_quaternion()
+
+def b2u_mat4(m):
+    """
+    Convert a Blender 4x4 transform Matrix into a
+    Unity Float4x4 transform matrix.
+    
+    Parameters
+    ----------
+    m : Matrix
+        The input Blender transform matrix (4x4)
+    
+    Returns
+    -------
+    o : Float4x4
+        The output Unity transform matrix (4x4)
+    """
+    
+    # TODO: Fix transformation
+    return Float4x4(
+        m[0][0], m[0][1], m[0][2], m[0][3],
+        m[1][0], m[1][1], m[1][2], m[1][3],
+        m[2][0], m[2][1], m[2][2], m[2][3],
+        m[3][0], m[3][1], m[3][2], m[3][3]
+    )
