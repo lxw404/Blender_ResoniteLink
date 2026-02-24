@@ -3,6 +3,7 @@ import bpy
 from mathutils import Euler
 
 # Resonitelink Imports
+from resonitelink.models.datamodel import *
 from resonitelink.proxies.datamodel.slot_proxy import SlotProxy
 from resonitelink.proxies.datamodel.component_proxy import ComponentProxy
 

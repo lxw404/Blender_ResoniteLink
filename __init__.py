@@ -18,7 +18,8 @@ import bpy
 from resonitelink.models.datamodel import *
 from resonitelink.proxies.datamodel.slot_proxy import SlotProxy
 from resonitelink.proxies.datamodel.component_proxy import ComponentProxy
-from resonitelink.models.assets.mesh.raw_data import TriangleSubmeshRawData
+from resonitelink.models.assets.mesh import Bone
+from resonitelink.models.assets.mesh.raw_data import TriangleSubmeshRawData, BoneWeightRawData
 from resonitelink import ResoniteLinkClient, ResoniteLinkWebsocketClient
 
 # Other imports
@@ -357,6 +358,7 @@ class SendSceneOperator(bpy.types.Operator):
                 armature_obj = None  # Armature object reference
                 bone_map = {}  # A map of bone names to other data
                 bones = []  # Flat list of Bone definitions
+                max_bone_weights = 0  # Maximum number of bone weights per vertex (clamped to 4)
                 if ((len(obj.vertex_groups) > 0) and (len(obj.modifiers) > 0)):
                     for m in obj.modifiers:
                         if m.type == 'ARMATURE':
@@ -387,6 +389,17 @@ class SendSceneOperator(bpy.types.Operator):
                                     )  # Default bind pose
                             )
                             bones.append(b)
+
+                        # Determine the maximum number of bone weights (clamped to 4)
+                        for v in mesh.vertices:
+                            ng = len(v.groups)
+                            if (ng > max_bone_weights):
+                                    max_bone_weights = ng
+                            
+                            # Clamp to the current maximum supported (4)
+                            if (max_bone_weights >= 4):
+                                max_bone_weights = 4
+                                break
                     
                 # Detect if the mesh has shapekeys
                 has_shapekeys = False
@@ -466,17 +479,25 @@ class SendSceneOperator(bpy.types.Operator):
                                 uvs[uid].append(layer[1][0])
                                 uvs[uid].append(layer[1][1])
                             if (is_skinned):
-                                # Loop through all bones and append weight contribution
+                                # Find the top weights (clamped to the currently supported max=4)
                                 vbg = mesh.vertices[vidx].groups  # Vertex bone groups
-                                vbgi = [v.group for v in vbg]  # Vertex bone group indices
-                                for bi, vn in enumerate(obj.vertex_groups):
-                                    # Extract the bone weight
-                                    bone_weight = vbg[vbgi.index(bi)].weight if bi in vbgi else 0.0
-                                    
+                                vbgiw = [(v.group, v.weight) for v in vbg]  # Vertex bone group indices, weight
+                                vbgiw = sorted(vbgiw, key = lambda v: v[1], reverse=True)[0:min(len(vbgiw), 4)]  # TODO: Support more than 4 weights eventually
+
+                                # Loop through top bones and append weight contribution
+                                for biw in vbgiw:
                                     # Append the raw data to the list
                                     bone_weights.append(BoneWeightRawData(
-                                        bone_index = bi,
-                                        weight = bone_weight
+                                        bone_index = biw[0],
+                                        weight = biw[1]
+                                    ))
+
+                                # If there is remaining space, fill it with zeros
+                                rem_num = max_bone_weights - len(vbgiw)
+                                for _ in range(rem_num):
+                                    bone_weights.append(BoneWeightRawData(
+                                        bone_index = 0,
+                                        weight = 0.0
                                     ))
                         else:
                             # Retrieve the old index
