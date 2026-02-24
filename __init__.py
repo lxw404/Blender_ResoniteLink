@@ -555,6 +555,7 @@ class SendSceneOperator(bpy.types.Operator):
                     normals=normals,
                     uv_channel_dimensions=[2 for _ in uvs],  # Hard coded to U, V (2D)
                     uvs=uvs,
+                    bone_weight_count=max_bone_weights if is_skinned else 0,
                     bones=bones if is_skinned else None,
                     bone_weights=bone_weights if is_skinned else None,
                     blendshapes=blendshapes if has_shapekeys else None
