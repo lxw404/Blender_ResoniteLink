@@ -353,7 +353,7 @@ class SendSceneOperator(bpy.types.Operator):
                     # TODO: New method
                     #mesh.customdata_custom_splitnormals_add()
                     pass
-                
+
                 # Triangulate the evaluated mesh
                 mesh.calc_loop_triangles()
 
