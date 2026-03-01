@@ -431,7 +431,10 @@ class SendSceneOperator(bpy.types.Operator):
                 else:
                     # mesh.customdata_custom_splitnormals_clear()
                     pass
-                #mesh.free_tangents()
+
+                if meshData['tangents'] is not None:
+                    mesh.free_tangents()
+                
                 eval_obj.to_mesh_clear()
         
         logger.log(logging.INFO, f"Done!")
