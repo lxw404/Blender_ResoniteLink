@@ -20,6 +20,8 @@ from resonitelink.proxies.datamodel.slot_proxy import SlotProxy
 from resonitelink.proxies.datamodel.component_proxy import ComponentProxy
 from resonitelink.models.assets.mesh import Bone
 from resonitelink.models.assets.mesh.raw_data import TriangleSubmeshRawData, BoneWeightRawData
+from resonitelink.models.assets.mesh import Bone
+from resonitelink.models.assets.mesh.raw_data import TriangleSubmeshRawData, BoneWeightRawData
 from resonitelink import ResoniteLinkClient, ResoniteLinkWebsocketClient
 
 # Other imports
@@ -433,6 +435,59 @@ class SendSceneOperator(bpy.types.Operator):
                 if (mesh.shape_keys is not None):
                     has_shapekeys = True
 
+                # Detect if the mesh is skinned
+                is_skinned = False
+                armature_obj = None  # Armature object reference
+                bone_map = {}  # A map of bone names to other data
+                bones = []  # Flat list of Bone definitions
+                max_bone_weights = 0  # Maximum number of bone weights per vertex (clamped to 4)
+                if ((len(obj.vertex_groups) > 0) and (len(obj.modifiers) > 0)):
+                    for m in obj.modifiers:
+                        if m.type == 'ARMATURE':
+                            armature_obj = m.object
+                            is_skinned = True
+                            break
+                    
+                    # If the object is skinned, map out the bones
+                    if is_skinned:
+                        # Extract vertex group names
+                        vgn = [v.name for v in obj.vertex_groups]
+                        
+                        # Extract bone names
+                        bone_data = armature_obj.data.bones
+                        bn = [b.name for b in bone_data]
+                        
+                        # Store bones
+                        for n in vgn:
+                            b = Bone(
+                                name = n,
+                                bind_pose = 
+                                    b2u_mat4(bone_data[bn.index(n)].matrix_local) if n in bn
+                                    else Float4x4(
+                                        1.0, 0.0, 0.0, 0.0,
+                                        0.0, 1.0, 0.0, 0.0,
+                                        0.0, 0.0, 1.0, 0.0,
+                                        0.0, 0.0, 0.0, 1.0
+                                    )  # Default bind pose
+                            )
+                            bones.append(b)
+
+                        # Determine the maximum number of bone weights (clamped to 4)
+                        for v in mesh.vertices:
+                            ng = len(v.groups)
+                            if (ng > max_bone_weights):
+                                    max_bone_weights = ng
+                            
+                            # Clamp to the current maximum supported (4)
+                            if (max_bone_weights >= 4):
+                                max_bone_weights = 4
+                                break
+                    
+                # Detect if the mesh has shapekeys
+                has_shapekeys = False
+                if (mesh.shape_keys is not None):
+                    has_shapekeys = True
+
                 # Save a dictionary of unique vertex hashes for fast indexing
                 v_map = {}  # TODO: Make hashing faster probably
                 idmax = 0   # Current maximum vertex ID
@@ -444,6 +499,8 @@ class SendSceneOperator(bpy.types.Operator):
                 tangents = []  # Tangents per vertex
                 uvs = [[] for _ in uv_layers]  # List of uv lists per uv set
                 submeshes = []  # List of triangle lists per material
+                bone_weights = []  # List of BoneWeightRawData corresponding to each vertex
+                blendshapes = []  # List of BlendshapeRawData for each blendshape
                 bone_weights = []  # List of BoneWeightRawData corresponding to each vertex
                 blendshapes = []  # List of BlendshapeRawData for each blendshape
 
@@ -511,6 +568,27 @@ class SendSceneOperator(bpy.types.Operator):
                             for uid, layer in enumerate(vuvs):
                                 uvs[uid].append(layer[1][0])
                                 uvs[uid].append(layer[1][1])
+                            if (is_skinned):
+                                # Find the top weights (clamped to the currently supported max=4)
+                                vbg = mesh.vertices[vidx].groups  # Vertex bone groups
+                                vbgiw = [(v.group, v.weight) for v in vbg]  # Vertex bone group indices, weight
+                                vbgiw = sorted(vbgiw, key = lambda v: v[1], reverse=True)[0:min(len(vbgiw), 4)]  # TODO: Support more than 4 weights eventually
+
+                                # Loop through top bones and append weight contribution
+                                for biw in vbgiw:
+                                    # Append the raw data to the list
+                                    bone_weights.append(BoneWeightRawData(
+                                        bone_index = biw[0],
+                                        weight = biw[1]
+                                    ))
+
+                                # If there is remaining space, fill it with zeros
+                                rem_num = max_bone_weights - len(vbgiw)
+                                for _ in range(rem_num):
+                                    bone_weights.append(BoneWeightRawData(
+                                        bone_index = 0,
+                                        weight = 0.0
+                                    ))
                             if (is_skinned):
                                 # Find the top weights (clamped to the currently supported max=4)
                                 vbg = mesh.vertices[vidx].groups  # Vertex bone groups
